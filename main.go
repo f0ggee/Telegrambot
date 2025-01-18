@@ -12,8 +12,18 @@ import (
 
 // Глобальные переменные
 var (
-	bot *tgbotapi.BotAPI
+	bot       *tgbotapi.BotAPI
+	userState = make(map[int64]string)
 )
+
+type user_Answer struct {
+	Name  string
+	Age   int
+	About string
+	City  string
+}
+
+var answer = make(map[int64]*user_Answer)
 
 // Пример структуры для кнопок
 type button struct {
@@ -26,7 +36,6 @@ func profile() tgbotapi.InlineKeyboardMarkup {
 	states := []button{
 		{name: "создать профиль", data: "create"},
 		{name: "Посмотреть профиль", data: "check"},
-		{name: "Назад", data: "backe"},
 	}
 	var buttons [][]tgbotapi.InlineKeyboardButton
 	for _, st := range states {
@@ -43,7 +52,7 @@ func startMenu() tgbotapi.InlineKeyboardMarkup {
 	states := []button{
 		{name: "Подсчет калорий", data: "calorie"},
 		{name: "Тренировка", data: "traine"},
-		{name: "Профиль", data: "profilee"},
+		{name: "Профиль", data: "profile"},
 	}
 
 	var buttons [][]tgbotapi.InlineKeyboardButton
@@ -75,6 +84,50 @@ func traineMenu() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(buttons...)
 }
 
+func anketaid(update tgbotapi.Update) {
+	chatID := update.Message.Chat.ID
+	text := update.Message.Text
+
+	// Инициализация анкеты
+	if answer[chatID] == nil {
+		answer[chatID] = &user_Answer{}
+	}
+
+	switch userState[chatID] {
+	case "ASK_NAME":
+		answer[chatID].Name = text
+		userState[chatID] = "ASK_AGE"
+		sendText(chatID, "Сколько вам лет?")
+
+	case "ASK_AGE":
+		age, err := strconv.Atoi(text)
+		if err != nil {
+			sendText(chatID, "Ошибка: введите число, пожалуйста")
+			return
+		}
+		answer[chatID].Age = age
+		userState[chatID] = "ASK_CITY"
+		sendText(chatID, "Из какого вы города?")
+
+	case "ASK_CITY":
+		answer[chatID].City = text
+		// Пример: если город — Москва
+		if strings.EqualFold(answer[chatID].City, "Москва") {
+			sendText(chatID, "Отлично! Можете записаться на тренировки в World Class:\nhttps://special.worldclass.ru/new/clubs/simvol")
+		}
+		userState[chatID] = "ASK_ABOUT"
+		sendText(chatID, "Расскажите о себе")
+
+	case "ASK_ABOUT":
+		answer[chatID].About = text
+		// Анкета завершена
+		userState[chatID] = ""
+		sendText(chatID, "Спасибо! Ваши данные сохранены. Вы можете посмотреть их в «Профиль».")
+	}
+}
+
+// Пример меню "help"
+
 func main() {
 	// Загружаем токен из .env (или откуда вам удобно)
 	err := godotenv.Load(".env")
@@ -105,7 +158,13 @@ func main() {
 		}
 
 		// Обрабатываем входящие сообщения
+		if update.Message != nil {
+			if update.Message.IsCommand() {
+				commands(update)
+			} else {
 
+			}
+		}
 	}
 }
 
@@ -117,53 +176,77 @@ func callbacks(update tgbotapi.Update) {
 
 	switch data {
 
-	case "create":
-		del := tgbotapi.NewDeleteMessage(chatID, messageID)
-		bot.Send(del)
-
-		msg := tgbotapi.NewMessage(chatID, "Пока нельзя создать")
-		msg.ReplyMarkup = profile()
-		bot.Send(msg)
-
 	case "check":
 		del := tgbotapi.NewDeleteMessage(chatID, messageID)
-		bot.Send(del)
+		if _, err := bot.Send(del); err != nil {
+			log.Printf("Error deleting message: %v", err)
+		}
 
-		msg := tgbotapi.NewMessage(chatID, "Профиля неут пока ")
-		msg.ReplyMarkup = profile()
-		bot.Send(msg)
+		ans, exist := answer[chatID]
+		if !exist || ans.Name == "" {
+			sendText(chatID, "Вы ещё не заполняли анкету. Нажмите «Создать профиль» в меню.")
+			return
+		}
 
-	case "backe":
+		msgText := "Ваш профиль:\n"
+		msgText += "Имя: " + ans.Name + "\n"
+		if ans.Age > 0 {
+			msgText += "Возраст: " + strconv.Itoa(ans.Age) + "\n"
+		} else {
+			msgText += "Возраст: не указан\n"
+		}
+		if ans.City != "" {
+			msgText += "Город: " + ans.City + "\n"
+		} else {
+			msgText += "Город: не указан\n"
+		}
+		if ans.About != "" {
+			msgText += "О себе: " + ans.About + "\n"
+		} else {
+			msgText += "О себе: не указано\n"
+		}
+
+		sendText(chatID, msgText)
+
+	case "profile":
+		userState[chatID] = "ASK_NAME"
+		answer[chatID] = &user_Answer{}
+
 		del := tgbotapi.NewDeleteMessage(chatID, messageID)
-		bot.Send(del)
+		if _, err := bot.Send(del); err != nil {
+			log.Printf("Error deleting message: %v", err)
+		}
 
-		newMenu := startMenu()
-		edit := tgbotapi.NewEditMessageReplyMarkup(chatID, messageID, newMenu)
-		bot.Send(edit)
+		sendText(chatID, "Здравствуйте! Пожалуйста, заполните анкету.\nКак вас зовут?")
 
 	case "traine":
 		// Удаляем старое сообщение
 		del := tgbotapi.NewDeleteMessage(chatID, messageID)
-		bot.Send(del)
+		if _, err := bot.Send(del); err != nil {
+			log.Printf("Error deleting message: %v", err)
+		}
 
 		// Выводим меню тренировок
 		msg := tgbotapi.NewMessage(chatID, "Это список тренировок по уровням:")
 		msg.ReplyMarkup = traineMenu()
-		bot.Send(msg)
+		sendMessage(msg)
 
 	case "back":
 		// Удаляем старое сообщение (например, меню тренировок)
 		del := tgbotapi.NewDeleteMessage(chatID, messageID)
-		bot.Send(del)
+		if _, err := bot.Send(del); err != nil {
+			log.Printf("Error deleting message: %v", err)
+		}
 
 		// Возвращаемся в главное меню
 		msg := tgbotapi.NewMessage(chatID, "Вы в главном меню:")
 		msg.ReplyMarkup = startMenu()
-		bot.Send(msg)
+		sendMessage(msg)
 
 	case "Light":
 		// Логика лёгкого уровня
 		sendText(chatID, "Вы выбрали лёгкий уровень")
+
 	case "Midle":
 		// Логика среднего уровня
 		sendText(chatID, "Вы выбрали средний уровень")
@@ -173,7 +256,6 @@ func callbacks(update tgbotapi.Update) {
 	}
 }
 
-// Функция обработки команд /start, /help, /train и т.п.
 func commands(update tgbotapi.Update) {
 	chatID := update.Message.Chat.ID
 	switch update.Message.Command() {
