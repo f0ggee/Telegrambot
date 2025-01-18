@@ -1,0 +1,340 @@
+package main
+
+import (
+	"log"
+	"os"
+	"strconv"
+	"strings"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
+	"github.com/joho/godotenv"
+)
+
+// Глобальные переменные
+var (
+	bot       *tgbotapi.BotAPI
+	userState = make(map[int64]string)
+)
+
+// Структура, в которой храним ответы анкеты
+type user_Answer struct {
+	Name  string
+	Age   int
+	About string
+	City  string
+}
+
+// Для каждого chatID — своя анкета
+var answer = make(map[int64]*user_Answer)
+
+// Структура для удобного описания кнопок
+type button struct {
+	name string
+	data string
+}
+
+// Главное меню: четыре кнопки
+func startMenu() tgbotapi.InlineKeyboardMarkup {
+	states := []button{
+		{name: "Подсчет калорий", data: "calorie"},
+		{name: "Анкета", data: "anketa"},
+		{name: "Тренировка", data: "traine"},
+		{name: "Профиль", data: "profile"},
+	}
+
+	var buttons [][]tgbotapi.InlineKeyboardButton
+	for _, st := range states {
+		row := tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(st.name, st.data),
+		)
+		buttons = append(buttons, row)
+	}
+	return tgbotapi.NewInlineKeyboardMarkup(buttons...)
+}
+
+// Меню «Тренировка»
+func traineMenu() tgbotapi.InlineKeyboardMarkup {
+	states := []button{
+		{name: "Тренировка: лёгкий уровень", data: "Light"},
+		{name: "Тренировка: средний уровень", data: "Middle"}, // исправили 'Midle' на 'Middle'
+		{name: "Тренировка: сложный уровень", data: "Hard"},
+		{name: "Назад", data: "back"},
+	}
+
+	var buttons [][]tgbotapi.InlineKeyboardButton
+	for _, st := range states {
+		row := tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(st.name, st.data),
+		)
+		buttons = append(buttons, row)
+	}
+	return tgbotapi.NewInlineKeyboardMarkup(buttons...)
+}
+
+// Пример меню "help"
+func helpMenu() tgbotapi.InlineKeyboardMarkup {
+	states := []button{
+		{name: "Помощь 1", data: "help_1"},
+		{name: "Помощь 2", data: "help_2"},
+		{name: "Назад", data: "back"},
+	}
+
+	var buttons [][]tgbotapi.InlineKeyboardButton
+	for _, st := range states {
+		row := tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(st.name, st.data),
+		)
+		buttons = append(buttons, row)
+	}
+	return tgbotapi.NewInlineKeyboardMarkup(buttons...)
+}
+
+// Обработка ответов на анкету
+func anketaid(update tgbotapi.Update) {
+	chatID := update.Message.Chat.ID
+	text := update.Message.Text
+
+	switch userState[chatID] {
+	case "ASK_NAME":
+		answer[chatID].Name = text
+
+		userState[chatID] = "ASK_AGE"
+		sendText(chatID, "Сколько вам лет?")
+
+	case "ASK_AGE":
+		age, err := strconv.Atoi(text)
+		if err != nil {
+			sendText(chatID, "Ошибка: введите число, пожалуйста")
+			return
+		}
+		answer[chatID].Age = age
+
+		userState[chatID] = "ASK_CITY"
+		sendText(chatID, "Из какого вы города?")
+
+	case "ASK_CITY":
+		answer[chatID].City = text
+
+		// Пример: если город — Москва
+		if strings.EqualFold(answer[chatID].City, "Москва") {
+			sendText(chatID, "Отлично! Можете записаться на тренировки в World Class:\nhttps://special.worldclass.ru/new/clubs/simvol")
+		}
+
+		userState[chatID] = "ASK_ABOUT"
+		sendText(chatID, "Расскажите о себе")
+
+	case "ASK_ABOUT":
+		answer[chatID].About = text
+
+		// Анкета завершена
+		userState[chatID] = ""
+		sendText(chatID, "Спасибо! Ваши данные сохранены. Вы можете посмотреть их в «Профиль».")
+	}
+}
+
+func main() {
+	// Загружаем токен из .env (если нужно)
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Println(".env not loaded (возможно, токен установлен иначе)")
+	}
+
+	botToken := os.Getenv("TG_BOT_API")
+	bot, err = tgbotapi.NewBotAPI(botToken)
+	if err != nil {
+		log.Fatalf("Ошибка инициализации бота: %v", err)
+	}
+
+	// Настраиваем получение обновлений
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+	updates, err := bot.GetUpdatesChan(u)
+	if err != nil {
+		log.Fatalf("Ошибка при получении канала обновлений: %v", err)
+	}
+
+	// Главный цикл обработки
+	for update := range updates {
+		// Обработка нажатия инлайн-кнопок
+		if update.CallbackQuery != nil {
+			callbacks(update)
+			continue
+		}
+
+		// Обработка текстовых сообщений
+		if update.Message != nil {
+			chatID := update.Message.Chat.ID
+
+			// Если пользователь в процессе заполнения анкеты, обрабатываем ответ
+			if userState[chatID] != "" && !update.Message.IsCommand() {
+				anketaid(update)
+				continue
+			}
+
+			// Иначе, если это команда
+			if update.Message.IsCommand() {
+				commands(update)
+				continue
+			}
+
+			// Любой другой текст
+			handleUserText(update)
+		}
+	}
+}
+
+// Обработка колбэков из инлайн-кнопок
+func callbacks(update tgbotapi.Update) {
+	data := update.CallbackQuery.Data
+	chatID := update.CallbackQuery.Message.Chat.ID
+	messageID := update.CallbackQuery.Message.MessageID
+
+	switch data {
+	case "calorie":
+		sendText(chatID, "Функция подсчёта калорий ещё не реализована.")
+
+	case "anketa":
+		// Ставим состояние и создаём структуру для хранения ответов
+		userState[chatID] = "ASK_NAME"
+		answer[chatID] = &user_Answer{}
+
+		// По желанию можно удалять предыдущее сообщение:
+		// del := tgbotapi.NewDeleteMessage(chatID, messageID)
+		// bot.Send(del)
+
+		sendText(chatID, "Здравствуйте! Пожалуйста, заполните анкету.\nКак вас зовут?")
+
+	case "profile":
+		// del := tgbotapi.NewDeleteMessage(chatID, messageID)
+		// bot.Send(del)
+
+		ans, exist := answer[chatID]
+		if !exist || ans.Name == "" {
+			sendText(chatID, "Вы ещё не заполняли анкету. Нажмите «Анкета» в меню.")
+			return
+		}
+
+		msgText := "Ваш профиль:\n"
+		msgText += "Имя: " + ans.Name + "\n"
+		if ans.Age > 0 {
+			msgText += "Возраст: " + strconv.Itoa(ans.Age) + "\n"
+		} else {
+			msgText += "Возраст: не указан\n"
+		}
+		if ans.City != "" {
+			msgText += "Город: " + ans.City + "\n"
+		} else {
+			msgText += "Город: не указан\n"
+		}
+		if ans.About != "" {
+			msgText += "О себе: " + ans.About + "\n"
+		} else {
+			msgText += "О себе: не указано\n"
+		}
+
+		sendText(chatID, msgText)
+
+	case "traine":
+		// del := tgbotapi.NewDeleteMessage(chatID, messageID)
+		// bot.Send(del)
+
+		msg := tgbotapi.NewMessage(chatID, "Это список тренировок по уровням:")
+		msg.ReplyMarkup = traineMenu()
+		bot.Send(msg)
+
+	case "back":
+		// del := tgbotapi.NewDeleteMessage(chatID, messageID)
+		// bot.Send(del)
+
+		msg := tgbotapi.NewMessage(chatID, "Вы в главном меню:")
+		msg.ReplyMarkup = startMenu()
+		bot.Send(msg)
+
+	case "Light":
+		sendText(chatID, "Вы выбрали лёгкий уровень тренировок.")
+	case "Middle":
+		sendText(chatID, "Вы выбрали средний уровень тренировок.")
+	case "Hard":
+		sendText(chatID, "Вы выбрали сложный уровень тренировок.")
+	}
+}
+
+// Обработка команд
+func commands(update tgbotapi.Update) {
+	chatID := update.Message.Chat.ID
+
+	switch update.Message.Command() {
+	case "start":
+		msg := tgbotapi.NewMessage(chatID, "Добро пожаловать! Выберите действие:")
+		msg.ReplyMarkup = startMenu()
+		sendMessage(msg)
+
+	case "help":
+		msg := tgbotapi.NewMessage(chatID, "Помощь. Выберите действие:")
+		msg.ReplyMarkup = helpMenu()
+		sendMessage(msg)
+
+	case "train":
+		msg := tgbotapi.NewMessage(chatID, "Это список тренировок по уровню сложности:")
+		msg.ReplyMarkup = traineMenu()
+		sendMessage(msg)
+
+	case "anketa":
+		// Запускаем анкету (прямой вызов командой)
+		userState[chatID] = "ASK_NAME"
+		answer[chatID] = &user_Answer{}
+		sendText(chatID, "Здравствуйте! Пожалуйста, заполните анкету.\nКак вас зовут?")
+
+	default:
+		sendText(chatID, "Неизвестная команда: "+update.Message.Command())
+	}
+}
+
+// Если пользователь написал что-то вне анкеты
+func handleUserText(update tgbotapi.Update) {
+	chatID := update.Message.Chat.ID
+	userText := update.Message.Text
+
+	// По умолчанию — просто эхо:
+	reply := "Вы ввели: " + userText
+	sendText(chatID, reply)
+}
+
+// Пример функции суммирования чисел из строки (необязательно)
+func sumNumbers(input string) (int, bool) {
+	input = strings.ReplaceAll(input, ",", " ")
+	parts := strings.Fields(input)
+	if len(parts) == 0 {
+		return 0, false
+	}
+	sum := 0
+	for _, p := range parts {
+		num, err := strconv.Atoi(p)
+		if err != nil {
+			return 0, false
+		}
+		sum += num
+	}
+	return sum, true
+}
+
+// Отправка простого текстового сообщения
+func sendText(chatID int64, text string) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send message: %v", err)
+	}
+}
+
+// Отправка любого Chattable-сообщения
+func sendMessage(msg tgbotapi.Chattable) {
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send message: %v", err)
+	}
+}
+
+// Заглушка для сохранения данных (например, в БД)
+func SaveNumbers(chatID int64, input string) error {
+	// Тут ваша логика сохранения, если нужно
+	return nil
+}
