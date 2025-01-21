@@ -1,240 +1,116 @@
 package main
 
 import (
+	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api"
-	"github.com/joho/godotenv"
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// Глобальные переменные
-var (
-	bot *tgbotapi.BotAPI
-)
-
-// Пример структуры для кнопок
-type button struct {
-	name string
-	data string
-}
-
-// /Меню профиля
-func profile() tgbotapi.InlineKeyboardMarkup {
-	states := []button{
-		{name: "создать профиль", data: "create"},
-		{name: "Посмотреть профиль", data: "check"},
-		{name: "Назад", data: "backe"},
+func calculateCalories(gender string, weight float64, height float64, age int) float64 {
+	if gender == "мужской" {
+		return 88.36 + (13.4 * weight) + (4.8 * height) - (5.7 * float64(age))
 	}
-	var buttons [][]tgbotapi.InlineKeyboardButton
-	for _, st := range states {
-		row := tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(st.name, st.data),
-		)
-		buttons = append(buttons, row)
-	}
-	return tgbotapi.NewInlineKeyboardMarkup(buttons...)
-}
-
-// Главное меню (пример)
-func startMenu() tgbotapi.InlineKeyboardMarkup {
-	states := []button{
-		{name: "Подсчет калорий", data: "calorie"},
-		{name: "Тренировка", data: "traine"},
-		{name: "Профиль", data: "profilee"},
-	}
-
-	var buttons [][]tgbotapi.InlineKeyboardButton
-	for _, st := range states {
-		row := tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(st.name, st.data),
-		)
-		buttons = append(buttons, row)
-	}
-	return tgbotapi.NewInlineKeyboardMarkup(buttons...)
-}
-
-// Меню «Тренировка»
-func traineMenu() tgbotapi.InlineKeyboardMarkup {
-	states := []button{
-		{name: "Тренировка: лёгкий уровень", data: "Light"},
-		{name: "Тренировка: средний уровень", data: "Midle"},
-		{name: "Тренировка: сложный уровень", data: "Hard"},
-		{name: "Назад", data: "back"},
-	}
-
-	var buttons [][]tgbotapi.InlineKeyboardButton
-	for _, st := range states {
-		row := tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData(st.name, st.data),
-		)
-		buttons = append(buttons, row)
-	}
-	return tgbotapi.NewInlineKeyboardMarkup(buttons...)
+	return 447.6 + (9.2 * weight) + (3.1 * height) - (4.3 * float64(age))
 }
 
 func main() {
-	// Загружаем токен из .env (или откуда вам удобно)
-	err := godotenv.Load(".env")
+	// Создаём бота
+	bot, err := tgbotapi.NewBotAPI("7182429562:AAGBcu7cddZF0jAwgVlA4uOzhbRdGt-PO18")
 	if err != nil {
-		log.Println(".env not loaded (it's okay if you have token in another place)")
+		log.Fatal(err)
 	}
+	bot.Debug = true
+	log.Printf("Бот авторизован как: %s", bot.Self.UserName)
 
-	botToken := os.Getenv("TG_BOT_API")
-	bot, err = tgbotapi.NewBotAPI(botToken)
-	if err != nil {
-		log.Fatalf("Failed to initialize Telegram bot API: %v", err)
-	}
-
-	// Настраиваем получение обновлений
+	// Настройка обновлений
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
-	updates, err := bot.GetUpdatesChan(u)
-	if err != nil {
-		log.Fatalf("Failed to get updates channel: %v", err)
-	}
+	updates := bot.GetUpdatesChan(u)
 
-	// Главный цикл обработки
+	// Хранилище данных пользователей
+	userData := make(map[int64]map[string]string)
+
 	for update := range updates {
-		// Обрабатываем колбэки от инлайн-кнопок
-		if update.CallbackQuery != nil {
-			callbacks(update)
+		if update.Message == nil {
 			continue
 		}
 
-		// Обрабатываем входящие сообщения
+		chatID := update.Message.Chat.ID
 
-	}
-}
-
-// Функция обработки колбэков
-func callbacks(update tgbotapi.Update) {
-	data := update.CallbackQuery.Data
-	chatID := update.CallbackQuery.Message.Chat.ID
-	messageID := update.CallbackQuery.Message.MessageID
-
-	switch data {
-
-	case "create":
-		del := tgbotapi.NewDeleteMessage(chatID, messageID)
-		bot.Send(del)
-
-		msg := tgbotapi.NewMessage(chatID, "Пока нельзя создать")
-		msg.ReplyMarkup = profile()
-		bot.Send(msg)
-
-	case "check":
-		del := tgbotapi.NewDeleteMessage(chatID, messageID)
-		bot.Send(del)
-
-		msg := tgbotapi.NewMessage(chatID, "Профиля неут пока ")
-		msg.ReplyMarkup = profile()
-		bot.Send(msg)
-
-	case "backe":
-		del := tgbotapi.NewDeleteMessage(chatID, messageID)
-		bot.Send(del)
-
-		newMenu := startMenu()
-		edit := tgbotapi.NewEditMessageReplyMarkup(chatID, messageID, newMenu)
-		bot.Send(edit)
-
-	case "traine":
-		// Удаляем старое сообщение
-		del := tgbotapi.NewDeleteMessage(chatID, messageID)
-		bot.Send(del)
-
-		// Выводим меню тренировок
-		msg := tgbotapi.NewMessage(chatID, "Это список тренировок по уровням:")
-		msg.ReplyMarkup = traineMenu()
-		bot.Send(msg)
-
-	case "back":
-		// Удаляем старое сообщение (например, меню тренировок)
-		del := tgbotapi.NewDeleteMessage(chatID, messageID)
-		bot.Send(del)
-
-		// Возвращаемся в главное меню
-		msg := tgbotapi.NewMessage(chatID, "Вы в главном меню:")
-		msg.ReplyMarkup = startMenu()
-		bot.Send(msg)
-
-	case "Light":
-		// Логика лёгкого уровня
-		sendText(chatID, "Вы выбрали лёгкий уровень")
-	case "Midle":
-		// Логика среднего уровня
-		sendText(chatID, "Вы выбрали средний уровень")
-	case "Hard":
-		// Логика сложного уровня
-		sendText(chatID, "Вы выбрали сложный уровень")
-	}
-}
-
-// Функция обработки команд /start, /help, /train и т.п.
-func commands(update tgbotapi.Update) {
-	chatID := update.Message.Chat.ID
-	switch update.Message.Command() {
-	case "start":
-		msg := tgbotapi.NewMessage(chatID, "Выберите действие")
-		msg.ReplyMarkup = startMenu()
-		sendMessage(msg)
-
-	case "train":
-		msg := tgbotapi.NewMessage(chatID, "Это список тренировок по уровню сложности:")
-		msg.ReplyMarkup = traineMenu()
-		sendMessage(msg)
-
-	case "profile":
-		msg := tgbotapi.NewMessage(chatID, "Выберите действия:")
-		msg.ReplyMarkup = profile()
-		sendMessage(msg)
-
-	default:
-		sendText(chatID, "Неизвестная команда: "+update.Message.Command())
-	}
-}
-
-// Функция обработки обычного текста (не команды и не колбэка)
-
-// Пример функции суммирования чисел из строки
-func sumNumbers(input string) (int, bool) {
-	// Заменяем запятые на пробелы, чтобы можно было вводить "1,2,3"
-	input = strings.ReplaceAll(input, ",", " ")
-	parts := strings.Fields(input)
-	if len(parts) == 0 {
-		return 0, false
-	}
-	sum := 0
-	for _, p := range parts {
-		num, err := strconv.Atoi(p)
-		if err != nil {
-			return 0, false
+		// Проверяем, если пользователь только начинает
+		if _, ok := userData[chatID]; !ok {
+			userData[chatID] = map[string]string{}
+			msg := tgbotapi.NewMessage(chatID, "Привет! Я помогу рассчитать твоё дневное количество калорий. Введи свой вес в кг:")
+			bot.Send(msg)
+			continue
 		}
-		sum += num
-	}
-	return sum, true
-}
 
-// Обёртка для отправки простого текстового сообщения
-func sendText(chatID int64, text string) {
-	msg := tgbotapi.NewMessage(chatID, text)
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Failed to send message: %v", err)
-	}
-}
+		// Обработка ввода данных
+		userInfo := userData[chatID]
 
-// Обёртка для отправки любого Chattable-сообщения
-func sendMessage(msg tgbotapi.Chattable) {
-	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Failed to send message: %v", err)
-	}
-}
+		if _, ok := userInfo["weight"]; !ok {
+			weight, err := strconv.ParseFloat(update.Message.Text, 64)
+			if err != nil {
+				msg := tgbotapi.NewMessage(chatID, "Пожалуйста, введи вес в числовом формате (например: 70.5):")
+				bot.Send(msg)
+				continue
+			}
+			userInfo["weight"] = fmt.Sprintf("%.1f", weight)
+			msg := tgbotapi.NewMessage(chatID, "Теперь введи свой рост в сантиметрах:")
+			bot.Send(msg)
+			continue
+		}
 
-// Заглушка для сохранения данных (например, в БД)
-func SaveNumbers(chatID int64, input string) error {
-	// Тут ваша логика сохранения. Пока просто заглушка.
-	return nil
+		if _, ok := userInfo["height"]; !ok {
+			height, err := strconv.ParseFloat(update.Message.Text, 64)
+			if err != nil {
+				msg := tgbotapi.NewMessage(chatID, "Пожалуйста, введи рост в числовом формате (например: 175):")
+				bot.Send(msg)
+				continue
+			}
+			userInfo["height"] = fmt.Sprintf("%.1f", height)
+			msg := tgbotapi.NewMessage(chatID, "Укажи свой возраст в годах:")
+			bot.Send(msg)
+			continue
+		}
+
+		if _, ok := userInfo["age"]; !ok {
+			age, err := strconv.Atoi(update.Message.Text)
+			if err != nil {
+				msg := tgbotapi.NewMessage(chatID, "Пожалуйста, введи возраст в числовом формате (например: 25):")
+				bot.Send(msg)
+				continue
+			}
+			userInfo["age"] = strconv.Itoa(age)
+			msg := tgbotapi.NewMessage(chatID, "Теперь укажи свой пол (мужской или женский):")
+			bot.Send(msg)
+			continue
+		}
+
+		if _, ok := userInfo["gender"]; !ok {
+			gender := strings.ToLower(strings.TrimSpace(update.Message.Text))
+			if gender != "мужской" && gender != "женский" {
+				msg := tgbotapi.NewMessage(chatID, "Пожалуйста, укажи свой пол: мужской или женский.")
+				bot.Send(msg)
+				continue
+			}
+			userInfo["gender"] = gender
+
+			// Все данные получены, расчёт калорий
+			weight, _ := strconv.ParseFloat(userInfo["weight"], 64)
+			height, _ := strconv.ParseFloat(userInfo["height"], 64)
+			age, _ := strconv.Atoi(userInfo["age"])
+			gender = userInfo["gender"]
+
+			calories := calculateCalories(gender, weight, height, age)
+			result := fmt.Sprintf("Твой базовый обмен веществ (калории в день): %.2f ккал.", calories)
+
+			msg := tgbotapi.NewMessage(chatID, result)
+			bot.Send(msg)
+			delete(userData, chatID) // Очистка данных пользователя
+		}
+	}
 }
