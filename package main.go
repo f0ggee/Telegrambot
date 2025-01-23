@@ -13,6 +13,16 @@ import (
 // userState хранит "состояние" пользователя (чтобы понимать, что мы у него спрашиваем).
 var userState = make(map[int64]string)
 
+const (
+	profileStepHeight = 1
+	profileStepWeight = 2
+	profileStepAge    = 3
+	profileStepGender = 4
+	profileStepDone   = 5
+)
+
+var userStep = make(map[int64]string)
+
 // userProfiles хранит профиль для каждого пользователя (по chatID).
 var userProfiles = make(map[int64]*user_profile)
 
@@ -163,10 +173,7 @@ func enlightenmentMidle() tgbotapi.InlineKeyboardMarkup {
 // Меню «Профиль»
 func profileMenu() tgbotapi.InlineKeyboardMarkup {
 	states := []button{
-		{name: "Введите ваш рост", data: "Ask_height"},
-		{name: "Введите ваш вес", data: "Ask_weight"},
-		{name: "Ведите сколько вы занимаетесь", data: "Ask_traine"},
-		{name: "Показать профиль", data: "Show_profile"},
+		{name: "Заполнить профиль", data: "prifule-anket"}, bopl,
 		{name: "Назад", data: "back"},
 	}
 
